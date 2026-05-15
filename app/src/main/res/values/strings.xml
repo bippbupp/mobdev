@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FV3 Chat</string>
+    <string name="login_title">Вход</string>
+    <string name="login">Логин</string>
+    <string name="password">Пароль</string>
+    <string name="sign_in">Войти</string>
+    <string name="logout">Выйти</string>
+    <string name="channels">Чаты</string>
+    <string name="messages">Сообщения</string>
+    <string name="choose_chat">Выберите чат</string>
+    <string name="message_hint">Сообщение</string>
+    <string name="send">Отправить</string>
+    <string name="back_to_chats">К чатам</string>
+    <string name="close_image">Закрыть картинку</string>
+    <string name="load_more">Загрузить ещё</string>
+    <string name="loading">Загрузка…</string>
+    <string name="empty_channels">Список чатов пуст</string>
+    <string name="empty_messages">Сообщений пока нет</string>
+    <string name="error_title">Ошибка</string>
+    <string name="ok">OK</string>
+    <string name="wrong_credentials">Неверный логин или пароль</string>
+    <string name="auth_expired">Сессия истекла. Войдите заново</string>
+    <string name="network_error">Не удалось связаться с сервером</string>
+    <string name="server_error">Сервер вернул ошибку</string>
+    <string name="unknown_error">Что-то пошло не так</string>
+    <string name="empty_login_password">Введите логин и пароль</string>
+    <string name="image_message">Картинка</string>
+    <string name="selected_chat">Выбранный чат</string>
+    <string name="no_more_messages">Больше сообщений нет</string>
+</resources>
