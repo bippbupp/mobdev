@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.data.network
+package ru.bippbupp.fv3chat.data.network
 
 import okhttp3.ResponseBody
 import retrofit2.Response
@@ -19,7 +19,7 @@ interface ChatApi {
 
     @GET("channel/{name}")
     suspend fun channelMessages(
-        @Path("name") name: String,
+        @Path(value = "name", encoded = true) name: String,
         @Query("limit") limit: Int,
         @Query("lastKnownId") lastKnownId: String,
         @Query("reverse") reverse: Boolean,

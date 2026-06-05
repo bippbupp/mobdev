@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat
+package ru.bippbupp.fv3chat
 
 import android.content.res.Configuration
 import android.os.Bundle

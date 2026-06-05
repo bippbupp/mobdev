@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.data.storage
+package ru.bippbupp.fv3chat.data.storage
 
 import android.content.Context
 

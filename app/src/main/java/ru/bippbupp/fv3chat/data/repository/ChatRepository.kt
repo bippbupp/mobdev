@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.data.repository
+package ru.bippbupp.fv3chat.data.repository
 
 import java.io.IOException
 import retrofit2.HttpException

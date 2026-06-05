@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.ui
+package ru.bippbupp.fv3chat.ui
 
 import ru.bippbupp.fv3chat.data.model.ChatMessage
 

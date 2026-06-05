@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.ui.theme
+package ru.bippbupp.fv3chat.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

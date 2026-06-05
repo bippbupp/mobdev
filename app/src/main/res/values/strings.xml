@@ -28,4 +28,5 @@
     <string name="image_message">Картинка</string>
     <string name="selected_chat">Выбранный чат</string>
     <string name="no_more_messages">Больше сообщений нет</string>
+    <string name="message_saved_offline">Сообщение сохранено и будет отправлено при восстановлении сети</string>
 </resources>

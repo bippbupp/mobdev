@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.data.model
+package ru.bippbupp.fv3chat.data.model
 
 import com.squareup.moshi.Json
 

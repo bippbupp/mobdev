@@ -2,6 +2,7 @@
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("kotlin-kapt")   // <-- обязательно добавить
 }
 
 android {
@@ -21,7 +22,7 @@ android {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro",
+                "proguard-rules.pro"
             )
         }
     }
@@ -29,10 +30,15 @@ android {
     buildFeatures {
         compose = true
     }
-}
 
-kotlin {
-    jvmToolchain(17)
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
 }
 
 dependencies {
@@ -53,6 +59,12 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-moshi:2.11.0")
     implementation("com.squareup.retrofit2:retrofit:2.11.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+
+    // Room
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

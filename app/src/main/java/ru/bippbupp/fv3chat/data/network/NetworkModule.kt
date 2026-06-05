@@ -1,8 +1,9 @@
-﻿package ru.bippbupp.fv3chat.data.network
+package ru.bippbupp.fv3chat.data.network
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
@@ -10,6 +11,9 @@ private const val BASE_URL = "https://faerytea.name/"
 
 object NetworkModule {
     fun createApi(session: AuthSession): ChatApi {
+        val logging = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BASIC
+        }
         val client = OkHttpClient.Builder()
             .addInterceptor { chain ->
                 val requestBuilder = chain.request().newBuilder()
@@ -18,6 +22,7 @@ object NetworkModule {
                 }
                 chain.proceed(requestBuilder.build())
             }
+            .addInterceptor(logging)
             .build()
 
         val moshi = Moshi.Builder()

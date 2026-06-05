@@ -1,4 +1,4 @@
-﻿package ru.bippbupp.fv3chat.ui
+package ru.bippbupp.fv3chat.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -8,25 +8,38 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.bippbupp.fv3chat.R
+import ru.bippbupp.fv3chat.data.database.AppDatabase
 import ru.bippbupp.fv3chat.data.model.ChatMessage
 import ru.bippbupp.fv3chat.data.network.AuthSession
+import ru.bippbupp.fv3chat.data.network.ChatApi
 import ru.bippbupp.fv3chat.data.network.NetworkModule
+import ru.bippbupp.fv3chat.data.network.NetworkMonitor
 import ru.bippbupp.fv3chat.data.repository.AuthExpiredException
 import ru.bippbupp.fv3chat.data.repository.ChatNetworkException
-import ru.bippbupp.fv3chat.data.repository.ChatRepository
 import ru.bippbupp.fv3chat.data.repository.ChatServerException
 import ru.bippbupp.fv3chat.data.repository.InvalidCredentialsException
+import ru.bippbupp.fv3chat.data.repository.OfflineFirstChatRepository
 import ru.bippbupp.fv3chat.data.storage.CredentialsStore
+import java.io.IOException
 
 private const val PAGE_SIZE = 20
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
+
     private val session = AuthSession()
-    private val repository = ChatRepository(NetworkModule.createApi(session), session)
+    private val database = AppDatabase.getInstance(application)
+    private val repository = OfflineFirstChatRepository(
+        api = NetworkModule.createApi(session) as ChatApi,
+        session = session,
+        database = database
+    )
     private val credentialsStore = CredentialsStore(application)
+    private val networkMonitor = NetworkMonitor(application)
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState
+
+    private var isNetworkAvailable = false
 
     init {
         credentialsStore.read()?.let { credentials ->
@@ -39,6 +52,83 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             login(credentials.username, credentials.password, isAutomatic = true)
         }
+
+        viewModelScope.launch {
+            networkMonitor.isConnected().collect { connected ->
+                val wasOffline = !isNetworkAvailable
+                isNetworkAvailable = connected
+                if (connected && wasOffline) {
+                    syncAfterNetworkRestored()
+                }
+            }
+        }
+    }
+
+    private suspend fun syncAfterNetworkRestored() {
+        processPendingMessages()
+        if (_uiState.value.isLoggedIn) {
+            refreshChannelsSilently()
+            _uiState.value.selectedChat?.let { channel ->
+                refreshMessagesSilently(channel)
+            }
+        }
+    }
+
+    private suspend fun processPendingMessages() {
+        val pending = repository.getAllPendingMessages()
+        if (pending.isEmpty()) return
+        val state = _uiState.value
+        val username = state.username
+        if (username.isBlank()) return
+
+        for (msg in pending) {
+            try {
+                val newId = repository.sendMessageOnline(username, msg.channel, msg.text)
+                repository.deletePendingMessage(msg.uid)
+                _uiState.update { current ->
+                    val messages = current.messagesByChat[msg.channel].orEmpty()
+                    val updated = messages.map { message ->
+                        if (message.id.startsWith("pending_") &&
+                            message.text == msg.text &&
+                            message.time?.toLongOrNull() == msg.timestamp
+                        ) {
+                            message.copy(id = newId.ifBlank { message.id })
+                        } else message
+                    }
+                    current.copy(
+                        messagesByChat = current.messagesByChat + (msg.channel to updated)
+                    )
+                }
+            } catch (e: Exception) {
+                if (e is AuthExpiredException) {
+                    _uiState.update {
+                        ChatUiState(loginInput = username, errorMessage = text(R.string.auth_expired))
+                    }
+                    return
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshChannelsSilently() {
+        runCatching { repository.refreshChannels() }
+            .onSuccess { channels ->
+                _uiState.update { it.copy(channels = channels) }
+            }
+            .onFailure { }
+    }
+
+    private suspend fun refreshMessagesSilently(channel: String) {
+        runCatching { repository.refreshMessages(channel) }
+            .onSuccess { fresh ->
+                _uiState.update { current ->
+                    current.copy(
+                        messagesByChat = current.messagesByChat.withMergedMessages(channel, fresh),
+                        canLoadMore = fresh.size == PAGE_SIZE
+                    )
+                }
+            }
+            .onFailure { }
     }
 
     fun onLoginChanged(value: String) {
@@ -71,16 +161,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openChat(channel: String) {
-        val alreadyLoaded = _uiState.value.messagesByChat.containsKey(channel)
         _uiState.update {
             it.copy(
                 selectedChat = channel,
                 fullImagePath = null,
-                canLoadMore = it.messagesByChat[channel]?.size == PAGE_SIZE,
             )
         }
-        if (!alreadyLoaded) {
-            loadMessages(channel)
+        refreshCachedMessages(channel)
+        if (isNetworkAvailable) {
+            viewModelScope.launch { refreshMessagesSilently(channel) }
+        }
+    }
+
+    private fun refreshCachedMessages(channel: String) {
+        viewModelScope.launch {
+            val cached = repository.getCachedMessages(channel)
+            if (cached.isNotEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        messagesByChat = it.messagesByChat + (channel to cached),
+                        canLoadMore = cached.size == PAGE_SIZE
+                    )
+                }
+            }
         }
     }
 
@@ -99,25 +202,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun loadOlderMessages() {
         val state = _uiState.value
         val channel = state.selectedChat ?: return
-        val oldestId = state.messagesByChat[channel]
-            .orEmpty()
-            .firstOrNull()
-            ?.id
-            ?: return
+        val oldestId = state.messagesByChat[channel].orEmpty().firstOrNull()?.id ?: return
         if (state.isMoreLoading || !state.canLoadMore) return
 
         viewModelScope.launch {
             _uiState.update { it.copy(isMoreLoading = true) }
-            runCatching { repository.messages(channel, lastKnownId = oldestId, reverse = true) }
+            runCatching { repository.loadOlderMessages(channel, oldestId) }
                 .onSuccess { older ->
                     _uiState.update { current ->
+                        val existing = current.messagesByChat[channel].orEmpty()
+                        val merged = (older + existing).distinctBy { it.id }
+                            .sortedBy { it.id.toLongOrNull() ?: Long.MAX_VALUE }
                         current.copy(
-                            messagesByChat = current.messagesByChat.withMergedMessages(
-                                channel = channel,
-                                messages = older,
-                            ),
+                            messagesByChat = current.messagesByChat + (channel to merged),
                             canLoadMore = older.size == PAGE_SIZE,
-                            isMoreLoading = false,
+                            isMoreLoading = false
                         )
                     }
                 }
@@ -133,29 +232,48 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true) }
-            runCatching { repository.sendText(state.username, channel, text) }
-                .onSuccess { newId ->
-                    val id = newId.ifBlank { System.currentTimeMillis().toString() }
+            runCatching { repository.sendMessageOnline(state.username, channel, text) }
+                .onSuccess { id ->
                     val message = ChatMessage(
-                        id = id,
+                        id = id.ifBlank { System.currentTimeMillis().toString() },
                         from = state.username,
                         to = channel,
                         text = text,
                         imagePath = null,
-                        time = (System.currentTimeMillis() / 1000L).toString(),
+                        time = (System.currentTimeMillis() / 1000L).toString()
                     )
                     _uiState.update { current ->
                         current.copy(
-                            messagesByChat = current.messagesByChat.withMergedMessages(
-                                channel = channel,
-                                messages = listOf(message),
-                            ),
+                            messagesByChat = current.messagesByChat.withMergedMessages(channel, listOf(message)),
                             messageInput = "",
-                            isSending = false,
+                            isSending = false
                         )
                     }
                 }
-                .onFailure { handleFailure(it, isSending = true) }
+                .onFailure { error ->
+                    if (error is ChatNetworkException || error is IOException) {
+                        val tempId = "pending_${System.currentTimeMillis()}"
+                        val tempMessage = ChatMessage(
+                            id = tempId,
+                            from = state.username,
+                            to = channel,
+                            text = text,
+                            imagePath = null,
+                            time = (System.currentTimeMillis() / 1000L).toString()
+                        )
+                        _uiState.update { current ->
+                            current.copy(
+                                messagesByChat = current.messagesByChat.withMergedMessages(channel, listOf(tempMessage)),
+                                messageInput = "",
+                                isSending = false,
+                                errorMessage = text(R.string.message_saved_offline)
+                            )
+                        }
+                        repository.savePendingMessage(channel, text, state.username)
+                    } else {
+                        handleFailure(error, isSending = true)
+                    }
+                }
         }
     }
 
@@ -215,33 +333,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadChannels() {
         viewModelScope.launch {
             _uiState.update { it.copy(isChannelsLoading = true) }
-            runCatching { repository.channels() }
-                .onSuccess { channels ->
-                    _uiState.update {
-                        it.copy(
-                            channels = channels,
-                            isChannelsLoading = false,
-                        )
+            val cached = repository.getCachedChannels()
+            if (cached.isNotEmpty()) {
+                _uiState.update { it.copy(channels = cached, isChannelsLoading = false) }
+            }
+            runCatching { repository.refreshChannels() }
+                .onSuccess { fresh ->
+                    _uiState.update { it.copy(channels = fresh, isChannelsLoading = false) }
+                }
+                .onFailure { error ->
+                    if (cached.isEmpty()) {
+                        handleFailure(error, isChannelsLoading = true)
+                    } else {
+                        _uiState.update { it.copy(errorMessage = text(R.string.network_error)) }
                     }
                 }
-                .onFailure { handleFailure(it, isChannelsLoading = true) }
-        }
-    }
-
-    private fun loadMessages(channel: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isMessagesLoading = true, canLoadMore = true) }
-            runCatching { repository.messages(channel) }
-                .onSuccess { messages ->
-                    _uiState.update {
-                        it.copy(
-                            messagesByChat = it.messagesByChat + (channel to messages.sortedById()),
-                            isMessagesLoading = false,
-                            canLoadMore = messages.size == PAGE_SIZE,
-                        )
-                    }
-                }
-                .onFailure { handleFailure(it, isMessagesLoading = true) }
         }
     }
 
@@ -293,7 +399,5 @@ private fun Map<String, List<ChatMessage>>.withMergedMessages(
     channel: String,
     messages: List<ChatMessage>,
 ): Map<String, List<ChatMessage>> =
-    this + (channel to (get(channel).orEmpty() + messages).distinctBy { it.id }.sortedById())
-
-private fun List<ChatMessage>.sortedById(): List<ChatMessage> =
-    sortedBy { it.id.toLongOrNull() ?: Long.MAX_VALUE }
+    this + (channel to (get(channel).orEmpty() + messages).distinctBy { it.id }
+        .sortedBy { it.id.toLongOrNull() ?: Long.MAX_VALUE })
